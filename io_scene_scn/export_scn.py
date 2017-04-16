@@ -311,6 +311,10 @@ def write_texture_chunk(file, texture):
       file.write(struct.pack("I", image_len))
       file.write(image_data)
       
+      # add padding if we need it
+      if image_len % 2 > 0:
+        file.write("\x00".encode("ascii"))
+      
     
   else:
     write_string(file, "null")
