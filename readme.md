@@ -1,0 +1,2 @@
+## Scene File Exporter - Blender Addon ##
+An addon for Blender to export "Scene Intermediate Files" by DMLabs. Note that this is incomplete and not suitable for creating exports containing bones / animations quite yet. 
