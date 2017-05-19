@@ -35,6 +35,27 @@ userdata_map = {}
 export_options = {}
 export_path = None
 
+# constants
+light_type_dict = {'POINT': 0, 'SPOT': 1, 'SUN':2, 'AREA':3}
+texture_blend_type_dict = {'MIX': 0, 
+                           'ADD': 1, 
+                           'SUBTRACT': 2, 
+                           'MULTIPLY': 3, 
+                           'SCREEN': 4, 
+                           'OVERLAY': 5, 
+                           'DIFFERENCE': 6, 
+                           'DIVIDE': 7, 
+                           'DARKEN': 8, 
+                           'LIGHTEN': 9, 
+                           'HUE': 10, 
+                           'SATURATION': 11, 
+                           'VALUE': 12, 
+                           'COLOR': 13,
+                          }
+rigidbody_shape_dict = {'BOX': 0, 'SPHERE': 1, 'CAPSULE': 2, 'CYLINDER': 3, 'CONE': 4, 'CONVEX_HULL': 5, 'MESH': 6}                           
+curve_type_dict = {'POLY': 0, 'BEZIER': 1, 'BSPLINE': 2, 'CARDINAL': 3, 'NURBS': 4}
+curve_tilt_dict = {'LINEAR': 0, 'CARDINAL': 1, 'BSPLINE': 2, 'EASE': 3}
+
 ######################################################
 # CHUNK FUNCTIONS
 ######################################################
@@ -66,15 +87,8 @@ def write_light_chunk(file, light):
     # write chunk
     ptr = create_chunk(file, "LGHT", 1, get_uuid())
     
-    # write id
-    if light.type == 'POINT':
-      file.write(struct.pack("H", 0))
-    elif light.type == 'SPOT':
-      file.write(struct.pack("H", 1))
-    elif light.type == 'SUN':
-      file.write(struct.pack("H", 2))
-    elif light.type == 'AREA':
-      file.write(struct.pack("H", 3))
+    # write type
+    file.write(struct.pack("H", light_type_dict.get(light.type, 0)))
       
     # write color
     color = (light.color[0], light.color[1], light.color[2], 1.0)
@@ -366,34 +380,8 @@ def write_material_chunk(file, material):
   
   for slot in material.texture_slots:
     if slot is not None and slot.texture is not None and slot.use:
-      # get blend mode (TODO: clean)
-      blend_mode = 0
-      if slot.blend_type == 'ADD':
-        blend_mode = 1
-      elif slot.blend_type == 'SUBTRACT':
-        blend_mode = 2
-      elif slot.blend_type == 'MULTIPLY':
-        blend_mode = 3
-      elif slot.blend_type == 'SCREEN':
-        blend_mode = 4
-      elif slot.blend_type == 'OVERLAY':
-        blend_mode = 5
-      elif slot.blend_type == 'DIFFERENCE':
-        blend_mode = 6
-      elif slot.blend_type == 'DIVIDE':
-        blend_mode = 7
-      elif slot.blend_type == 'DARKEN':
-        blend_mode = 8
-      elif slot.blend_type == 'LIGHTEN':
-        blend_mode = 9
-      elif slot.blend_type == 'HUE':
-        blend_mode = 10
-      elif slot.blend_type == 'SATURATION':
-        blend_mode = 11
-      elif slot.blend_type == 'VALUE':
-        blend_mode = 12
-      elif slot.blend_type == 'COLOR':
-        blend_mode = 13
+      # get blend mode
+      blend_mode = texture_blend_type_dict.get(slot.blend_type, 0)
         
       # write stuff about this texture (TODO: clean)
       if slot.use_map_color_diffuse:
@@ -556,20 +544,7 @@ def write_rigidbody_chunk(file, rigidbody):
   
   file.write(struct.pack("HH", (1 if rigidbody.kinematic else 0), (1 if rigidbody.use_start_deactivated else 0)))
   
-  prim_type = 0
-  if rigidbody.collision_shape == 'SPHERE':
-    prim_type = 1
-  elif rigidbody.collision_shape == 'CAPSULE':
-    prim_type = 2
-  elif rigidbody.collision_shape == 'CYLINDER':
-    prim_type = 3
-  elif rigidbody.collision_shape == 'CONE':
-    prim_type = 4
-  elif rigidbody.collision_shape == 'CONVEX_HULL':
-    prim_type = 5
-  elif rigidbody.collision_shape == 'MESH':
-    prim_type = 6
-    
+  prim_type = rigidbody_shape_dict.get(rigidbody.collision_shape, 0)
   file.write(struct.pack("H", prim_type))
   
   close_chunk(file, ptr)
@@ -582,24 +557,10 @@ def write_spline_chunk(file, curve):
   file.write(struct.pack("I", len(curve.splines)))
   for sub_spline in curve.splines:
     # get type
-    type = 0
-    if sub_spline.type == 'BEZIER':
-      type = 1
-    elif sub_spline.type == 'BSPLINE':
-      type = 2
-    elif sub_spline.type == 'CARDINAL':
-      type = 3
-    elif sub_spline.type == 'NURBS':
-      type = 4
+    type = curve_type_dict.get(sub_spline.type, 0)
       
     # get tilt type
-    tilt_type = 0
-    if sub_spline.tilt_interpolation == 'CARDINAL':
-      tilt_type = 1
-    elif sub_spline.tilt_interpolation == 'BSPLINE':
-      tilt_type = 2
-    elif sub_spline.tilt_interpolation == 'EASE':
-      tilt_type = 3
+    tilt_type = curve_tilt_dict.get(sub_spline.tilt_interpolation, 0)
       
     # write spline data (finally)
     file.write(struct.pack("HH", type, tilt_type))
@@ -721,8 +682,6 @@ def write_anim_chunk(file, anim):
       kf_interpolation_type = 1 # default to linear
       if kf.interpolation == 'CONSTANT':
         kf_interpolation_type = 0
-      elif kf.interpolation == 'LINEAR':
-        kf_interpolation_type = 1
       else:
         kf_interpolation_type = 2
       
@@ -996,6 +955,10 @@ def export_scene(file):
     material_map = {}
     
     for mtrl in bpy.data.materials:
+      # don't write unused stuff
+      if mtrl.users == 0:
+        continue
+        
       write_material_chunk(file, mtrl)
       material_map[mtrl.name] = current_id
     
@@ -1020,6 +983,10 @@ def export_scene(file):
     mesh_map = {}
     
     for mesh in bpy.data.meshes:
+      # don't write unused stuff
+      if mesh.users == 0:
+        continue
+        
       print("...writing mesh " + mesh.name)
       write_mesh_chunk(file, mesh)
       mesh_map[mesh.name] = current_id
