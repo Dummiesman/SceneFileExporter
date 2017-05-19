@@ -57,11 +57,9 @@ class ExportSCN(bpy.types.Operator, ExportHelper):
                                                default='scn')
     
     # export things
-    apply_modifiers = BoolProperty(
-        name="Apply Modifiers",
-        description="Applies modifiers, duh! (MULTI USER MESHES WILL NOT HAVE MODIFIERS APPLIED)",
-        default=True,
-        )
+    modifier_mode = bpy.props.EnumProperty(name="Modifier Mode", 
+                                           items = (('preserve', 'Export Modifiers',''), ('apply','Apply Before Export','')),
+                                           default='preserve')
     
         
     def draw(self, context):
@@ -72,7 +70,7 @@ class ExportSCN(bpy.types.Operator, ExportHelper):
         
         box = layout.box()
         box.label("Mesh settings")
-        box.prop(self, "apply_modifiers")
+        box.prop(self, "modifier_mode")
         
         box = layout.box()
         box.label("Texture settings")

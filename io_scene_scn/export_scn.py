@@ -30,6 +30,7 @@ curve_map = {}
 rigidbody_map = {}
 vertex_group_map = {}
 userdata_map = {}
+modifier_map = {}
 
 # used for options
 export_options = {}
@@ -55,10 +56,97 @@ texture_blend_type_dict = {'MIX': 0,
 rigidbody_shape_dict = {'BOX': 0, 'SPHERE': 1, 'CAPSULE': 2, 'CYLINDER': 3, 'CONE': 4, 'CONVEX_HULL': 5, 'MESH': 6}                           
 curve_type_dict = {'POLY': 0, 'BEZIER': 1, 'BSPLINE': 2, 'CARDINAL': 3, 'NURBS': 4}
 curve_tilt_dict = {'LINEAR': 0, 'CARDINAL': 1, 'BSPLINE': 2, 'EASE': 3}
+modifier_type_dict = {'EDGE_SPLIT': 0, 'MIRROR': 1, 'SUBSURF': 2, 'ARRAY': 3, 'BOOLEAN': 4}
+boolean_operator_dict = {'INTERSECT': 0, 'UNION': 1, 'DIFFERENCE': 2}
 
 ######################################################
 # CHUNK FUNCTIONS
 ######################################################
+def write_modifier_chunk(file, modifier):
+    # verify we support this
+    if modifier_type_dict.get(modifier.type, -1) < 0:
+      return
+    
+    # write chunk
+    ptr = create_chunk(file, "MDFR", 1, get_uuid())
+    
+    # write type
+    file.write(struct.pack("H", modifier_type_dict.get(modifier.type)))
+      
+    # write modifier specific data (TODO: seperate? maybe in its own .py file?)
+    if modifier.type == 'EDGE_SPLIT':
+      file.write(struct.pack("H", 1 if modifier.use_edge_sharp else 0))
+      file.write(struct.pack("H", 1 if modifier.use_edge_angle else 0))
+      
+      # write angle if specified
+      if modifier.use_edge_angle:
+        file.write(struct.pack("f", modifier.split_angle * 57.2958))
+    elif modifier.type == 'MIRROR':
+      # create axis bitfield
+      axis_id = 0
+      if modifier.use_x:
+        axis_id |= 1
+      if modifier.use_y:
+        axis_id |= 2
+      if modifier.use_z:
+        axis_id |= 3
+        
+      file.write(struct.pack("H", axis_id))
+      
+      # create uv axis bitfield
+      uv_axis_id = 0
+      if modifier.use_mirror_u:
+        uv_axis_id |= 1
+      if modifier.use_mirror_v:
+        uv_axis_id |= 2
+      
+      file.write(struct.pack("H", uv_axis_id))
+      
+      # write the rest
+      file.write(struct.pack("H", 1 if modifier.use_clip else 0))
+      file.write(struct.pack("H", 1 if modifier.use_mirror_merge else 0))
+      
+      # write if applicable
+      if modifier.use_mirror_merge:
+        file.write(struct.pack("f", modifier.merge_threshold)) 
+    elif modifier.type == 'SUBSURF':
+      file.write(struct.pack("H", modifier.levels))
+      file.write(struct.pack("H", 0 if modifier.subdivision_type == 'SIMPLE' else 1))
+    elif modifier.type == 'ARRAY':
+      file.write(struct.pack("H", modifier.count - 1))
+      
+      # write type
+      if modifier.use_relative_offset:
+        file.write(struct.pack("H", 0))
+      elif modifier.use_constant_offset:
+        file.write(struct.pack("H", 1))        
+      elif modifier.use_object_offset:
+        file.write(struct.pack("H", 2))
+      
+      # write offset or datablock id
+      if modifier.use_object_offset:
+        file.write(struct.pack("i", object_map.get(modifier.offset_object.name, -1)))
+      else:
+        offset = [0.0, 0.0, 0.0]
+        if modifier.use_relative_offset:
+          offset = modifier.relative_offset_displace
+        else:
+          offset = modifier.constant_offset_displace
+        file.write(struct.pack("fff", *offset))
+        
+      # write merge settings
+      file.write(struct.pack("H", 1 if modifier.use_merge_vertices else 0))
+      if modifier.use_merge_vertices:
+        file.write(struct.pack("f", modifier.merge_threshold))
+    elif modifier.type == 'BOOLEAN':
+      file.write(struct.pack("i", object_map.get(modifier.object.name, -1)))
+      file.write(struct.pack("H", boolean_operator_dict.get(modifier.operation, 0)))
+      file.write(struct.pack("H", 0 if modifier.solver == 'CARVE' else 1))
+      
+    # close chunk
+    close_chunk(file, ptr)
+
+
 def write_meta_chunk(file, pairs, type = "META"):
     # return if nothing
     if(len(pairs) == 0):
@@ -203,6 +291,7 @@ def write_object_chunk(file, ob):
   
   # write datablocks
   datablock_count = 0
+  if export_options["MODIFIER_MODE"] == 'preserve': datablock_count += len(ob.modifiers)
   if ob.type != 'EMPTY':  datablock_count += 1
   if ob.rigid_body is not None: datablock_count += 1
   if len(ob.vertex_groups) > 0: datablock_count += 1
@@ -221,7 +310,12 @@ def write_object_chunk(file, ob):
   # write material datablocks
   for matid in material_datablock_ids:
     file.write(struct.pack("I", matid))
-    
+  
+  # write modifier datablocks
+  if export_options["MODIFIER_MODE"] == 'preserve':
+    for mod in ob.modifiers:
+      file.write(struct.pack("I", modifier_map[ob.name + "_" + mod.name]))
+  
   # write "concrete" datablock
   map = None
   if ob.type == 'LAMP':
@@ -449,7 +543,7 @@ def write_mesh_chunk(file, mesh):
   bm = bmesh.new()
   
   # use mesh with modifiers applied if we only have one user & the export option was set
-  if mesh.users == 1 and export_options["APPLY_MODIFIERS"]:
+  if mesh.users == 1 and export_options["MODIFIER_MODE"] == 'apply':
     # find our parent owner
     for ob in bpy.data.objects:
       if ob.type == 'MESH' and ob.data.name == mesh.name:
@@ -729,6 +823,17 @@ def write_armature_chunk(file, armature):
 ######################################################
 # EXPORT HELPERS
 ######################################################
+def get_heirarchy_level(ob):
+  level = 0
+  
+  current_object = ob
+  while current_object.parent is not None:
+    level += 1
+    current_object = current_object.parent
+    
+  return level
+
+
 def angle2d(p1, p2):
     s = p1[0] * p2[1] - p2[0] * p1[1] 
     c = p1[0] * p2[0] + p1[1] * p2[1]
@@ -769,7 +874,8 @@ def translate_data_path(path):
       return base_prop
    
   print("Unable to translate animation path: " + path)
-  
+
+
 def bounds(msh):
     bnd_max = [-9999.0, -9999.0, -9999.0]
     bnd_min = [9999.0, 9999.0, 9999.0]
@@ -858,7 +964,8 @@ def create_chunk(file, type, version, id):
     file.write("DATAxxxx".encode("ascii"))
     
     return ptr
-    
+
+
 def close_chunk(file, ptr):
     # get difference
     difference = file.tell() - ptr
@@ -1020,16 +1127,21 @@ def export_scene(file):
         rigidbody_map[ob.name] = current_id
     
     # write objects
-    global object_map, vertex_group_map
+    global object_map, vertex_group_map, modifier_map
     object_map = {}
     vertex_group_map = {}
+    modifier_map = {}
+    
+    #first, get the highest heirarchy level
+    heirarchy_max_level = 0
+    for ob in bpy.data.objects:
+      heirarchy_max_level = max(heirarchy_max_level, get_heirarchy_level(ob))
     
     # first write unparented objects, then unparented
-    for export_mode in ("unparented", "parented"):
+    for level in range(heirarchy_max_level + 1):
       for ob in bpy.data.objects:
-        if ob.parent is not None and export_mode == "unparented":
-          continue
-        if ob.parent is None and export_mode == "parented":
+        # proper level?
+        if get_heirarchy_level(ob) != level:
           continue
           
         print("...writing object " + ob.name)
@@ -1037,6 +1149,12 @@ def export_scene(file):
         if len(ob.vertex_groups) > 0:
           write_vertex_group_chunk(file, ob)
           vertex_group_map[ob.name] = current_id
+          
+        # write modifier chunks
+        if export_options["MODIFIER_MODE"] == 'preserve':
+          for mod in ob.modifiers:
+            write_modifier_chunk(file, mod)
+            modifier_map[ob.name + "_" + mod.name] = current_id
           
         # write object  
         write_object_chunk(file, ob)
@@ -1070,7 +1188,7 @@ def save(operator,
          filepath="",
          embed_textures=False,
          texture_path_mode=None,
-         apply_modifiers = True,
+         modifier_mode = 'apply',
          ):
     
     # set up options
@@ -1080,7 +1198,7 @@ def save(operator,
     
     export_options["EMBED_TEXTURES"] = embed_textures
     export_options["RELATIVITY"] = texture_path_mode
-    export_options["APPLY_MODIFIERS"] = apply_modifiers
+    export_options["MODIFIER_MODE"] = modifier_mode
     
     # save it
     save_scn(filepath,
