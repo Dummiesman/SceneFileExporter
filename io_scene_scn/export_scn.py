@@ -959,14 +959,6 @@ def truncate_format_string(format):
       return format
 
 
-def calc_wire_edge_count(bm):
-    wire_edge_count = 0
-    for ed in bm.edges:
-      if ed.is_wire:
-        wire_edge_count += 1
-    return wire_edge_count
-
-
 def write_texture_reference(file, texture, mapping, multiplier, blend_type):
     file.write(struct.pack("I", texture_map[texture.name]))
     file.write(struct.pack("HH", mapping, blend_type))
