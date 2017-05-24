@@ -518,7 +518,7 @@ def write_material_chunk(file, material):
   
 def write_mesh_chunk(file, mesh):
   # write chunk
-  ptr = create_chunk(file, "MESH", 2, get_uuid())
+  ptr = create_chunk(file, "MESH", 3, get_uuid())
   
   write_string(file, mesh.name)
   
@@ -528,18 +528,7 @@ def write_mesh_chunk(file, mesh):
   file.write(struct.pack("fff", *bbox_max))
   file.write(struct.pack("fff", *bbox_center))
   
-  # write color and uv layers
-  file.write(struct.pack("HH", len(mesh.uv_layers), len(mesh.vertex_colors)))
-  
-  for uv_layer in mesh.uv_layers:
-    write_string(file, uv_layer.name)
-    file.write(struct.pack("H", (1 if mesh.uv_layers.active.name == uv_layer.name else 0)))
-      
-  for vc_layer in mesh.vertex_colors:
-    write_string(file, vc_layer.name)
-    file.write(struct.pack("H", (1 if vc_layer.active_render else 0)))
-      
-  # write uv and vc layer names
+  # load up bmesh data
   bm = bmesh.new()
   
   # use mesh with modifiers applied if we only have one user & the export option was set
@@ -551,24 +540,78 @@ def write_mesh_chunk(file, mesh):
   else:
     bm.from_mesh(mesh)
   
+  # get edge crease layer
+  crease_layer = bm.edges.layers.crease.verify()
+  
+  # log edges we want to export
+  # we do this so we don't have to loop the edge table
+  # several times
+  export_edges = []
+  edge_index_remap = {}
+  for edge in bm.edges:
+    crease = edge[crease_layer]
+    if not edge.smooth or edge.seam or crease > 0:
+      edge_index_remap[edge.index] = len(export_edges)
+      export_edges.append(edge)
+      
+  # gather tag list
+  tag_list = []
+  for edge in export_edges:
+    if not edge.smooth and not "SHARP" in tag_list:
+      tag_list.append("SHARP")
+    if edge.seam and not "SEAM" in tag_list:
+      tag_list.append("SEAM")
+  
+  # write tag list
+  file.write(struct.pack("H", len(tag_list)))
+  for tag in tag_list:
+    write_string(file, tag)
+  
+  # write and gather color and uv layers
+  file.write(struct.pack("HH", len(mesh.uv_layers), len(mesh.vertex_colors)))
   bm_uv_layers = []
   bm_vc_layers = []
+  
   for uv_layer in mesh.uv_layers:
+    write_string(file, uv_layer.name)
+    file.write(struct.pack("H", (1 if mesh.uv_layers.active.name == uv_layer.name else 0)))
     bm_uv_layers.append(bm.loops.layers.uv.get(uv_layer.name))
+    
   for vc_layer in mesh.vertex_colors:
+    write_string(file, vc_layer.name)
+    file.write(struct.pack("H", (1 if vc_layer.active_render else 0)))
     bm_vc_layers.append(bm.loops.layers.color.get(vc_layer.name))
-
-  # write geometry
+  
+  
+  # gather tag links
+  num_tag_links = 0
+  tag_links = []
+  
+  for edge in export_edges:
+    if not edge.smooth:
+      tag_links.append((1, tag_list.index("SHARP"), edge_index_remap[edge.index]))
+    if edge.seam:
+      tag_links.append((1, tag_list.index("SEAM"), edge_index_remap[edge.index]))
+  
+  # write  tag links (but get some important data first!)
   num_verts = len(bm.verts)
-  compact_indices = (num_verts <= 65535) # if we have less than 65535 verts, use short instead of long
-  file.write(struct.pack("III", num_verts, calc_wire_edge_count(bm), len(mesh.materials)))
+  compact_indices = (num_verts <= 65535) # if we have less than 65535 verts, use short instead of long  
+  
+  file.write(struct.pack("I", len(tag_links)))
+  for link in tag_links:
+    file.write(struct.pack("HH", link[0], link[1])) #type, ID
+    file.write(struct.pack(("H" if compact_indices else "I"), link[2])) # index in list of vert/edge/face
+    
+  
+  # write geometry
+  file.write(struct.pack("III", num_verts, len(export_edges), max(len(mesh.materials), 1)))
   for vert in bm.verts:
     file.write(struct.pack("fff", vert.co[0], vert.co[1], vert.co[2]))
     file.write(struct.pack("fff", vert.normal[0], vert.normal[1], vert.normal[2]))
   
-  for edge in bm.edges:
-    if edge.is_wire:
-      file.write(struct.pack(("HH" if compact_indices else "II"), edge.verts[0].index, edge.verts[1].index))
+  for edge in export_edges:
+    file.write(struct.pack(("HH" if compact_indices else "II"), edge.verts[0].index, edge.verts[1].index))
+    file.write(struct.pack("f", crease))
   
   # gather num faces on each mat
   num_materials = max(len(mesh.materials), 1)
