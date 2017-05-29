@@ -71,16 +71,16 @@ def write_modifier_chunk(file, modifier):
     ptr = create_chunk(file, "MDFR", 1, get_uuid())
     
     # write type
-    file.write(struct.pack("H", modifier_type_dict.get(modifier.type)))
+    file.write(struct.pack("<H", modifier_type_dict.get(modifier.type)))
       
     # write modifier specific data (TODO: seperate? maybe in its own .py file?)
     if modifier.type == 'EDGE_SPLIT':
-      file.write(struct.pack("H", 1 if modifier.use_edge_sharp else 0))
-      file.write(struct.pack("H", 1 if modifier.use_edge_angle else 0))
+      file.write(struct.pack("<H", 1 if modifier.use_edge_sharp else 0))
+      file.write(struct.pack("<H", 1 if modifier.use_edge_angle else 0))
       
       # write angle if specified
       if modifier.use_edge_angle:
-        file.write(struct.pack("f", modifier.split_angle * 57.2958))
+        file.write(struct.pack("<f", modifier.split_angle * 57.2958))
     elif modifier.type == 'MIRROR':
       # create axis bitfield
       axis_id = 0
@@ -91,7 +91,7 @@ def write_modifier_chunk(file, modifier):
       if modifier.use_z:
         axis_id |= 3
         
-      file.write(struct.pack("H", axis_id))
+      file.write(struct.pack("<H", axis_id))
       
       # create uv axis bitfield
       uv_axis_id = 0
@@ -100,48 +100,48 @@ def write_modifier_chunk(file, modifier):
       if modifier.use_mirror_v:
         uv_axis_id |= 2
       
-      file.write(struct.pack("H", uv_axis_id))
+      file.write(struct.pack("<H", uv_axis_id))
       
       # write the rest
-      file.write(struct.pack("H", 1 if modifier.use_clip else 0))
-      file.write(struct.pack("H", 1 if modifier.use_mirror_merge else 0))
+      file.write(struct.pack("<H", 1 if modifier.use_clip else 0))
+      file.write(struct.pack("<H", 1 if modifier.use_mirror_merge else 0))
       
       # write if applicable
       if modifier.use_mirror_merge:
-        file.write(struct.pack("f", modifier.merge_threshold)) 
+        file.write(struct.pack("<f", modifier.merge_threshold)) 
     elif modifier.type == 'SUBSURF':
-      file.write(struct.pack("H", modifier.levels))
-      file.write(struct.pack("H", 0 if modifier.subdivision_type == 'SIMPLE' else 1))
+      file.write(struct.pack("<H", modifier.levels))
+      file.write(struct.pack("<H", 0 if modifier.subdivision_type == 'SIMPLE' else 1))
     elif modifier.type == 'ARRAY':
-      file.write(struct.pack("H", modifier.count - 1))
+      file.write(struct.pack("<H", modifier.count - 1))
       
       # write type
       if modifier.use_relative_offset:
-        file.write(struct.pack("H", 0))
+        file.write(struct.pack("<H", 0))
       elif modifier.use_constant_offset:
-        file.write(struct.pack("H", 1))        
+        file.write(struct.pack("<H", 1))        
       elif modifier.use_object_offset:
-        file.write(struct.pack("H", 2))
+        file.write(struct.pack("<H", 2))
       
       # write offset or datablock id
       if modifier.use_object_offset:
-        file.write(struct.pack("i", object_map.get(modifier.offset_object.name, -1)))
+        file.write(struct.pack("<I", object_map.get(modifier.offset_object.name, -1)))
       else:
         offset = [0.0, 0.0, 0.0]
         if modifier.use_relative_offset:
           offset = modifier.relative_offset_displace
         else:
           offset = modifier.constant_offset_displace
-        file.write(struct.pack("fff", *offset))
+        file.write(struct.pack("<fff", *offset))
         
       # write merge settings
-      file.write(struct.pack("H", 1 if modifier.use_merge_vertices else 0))
+      file.write(struct.pack("<H", 1 if modifier.use_merge_vertices else 0))
       if modifier.use_merge_vertices:
-        file.write(struct.pack("f", modifier.merge_threshold))
+        file.write(struct.pack("<f", modifier.merge_threshold))
     elif modifier.type == 'BOOLEAN':
-      file.write(struct.pack("i", object_map.get(modifier.object.name, -1)))
-      file.write(struct.pack("H", boolean_operator_dict.get(modifier.operation, 0)))
-      file.write(struct.pack("H", 0 if modifier.solver == 'CARVE' else 1))
+      file.write(struct.pack("<I", object_map.get(modifier.object.name, -1)))
+      file.write(struct.pack("<H", boolean_operator_dict.get(modifier.operation, 0)))
+      file.write(struct.pack("<H", 0 if modifier.solver == 'CARVE' else 1))
       
     # close chunk
     close_chunk(file, ptr)
@@ -156,7 +156,7 @@ def write_meta_chunk(file, pairs, type = "META"):
     ptr = create_chunk(file, type, 1, get_uuid())
     
     num_pairs = len(pairs)
-    file.write(struct.pack("I", num_pairs))
+    file.write(struct.pack("<I", num_pairs))
     
     # write pairs
     for pair in pairs:
@@ -176,36 +176,36 @@ def write_light_chunk(file, light):
     ptr = create_chunk(file, "LGHT", 1, get_uuid())
     
     # write type
-    file.write(struct.pack("H", light_type_dict.get(light.type, 0)))
+    file.write(struct.pack("<H", light_type_dict.get(light.type, 0)))
       
     # write color
     color = (light.color[0], light.color[1], light.color[2], 1.0)
-    file.write(struct.pack("ffff", *color))
+    file.write(struct.pack("<ffff", *color))
     
     # write obvious data
-    file.write(struct.pack("f", light.energy))
+    file.write(struct.pack("<f", light.energy))
     
     # write shadow data
-    file.write(struct.pack("H", (0 if light.shadow_method == 'NOSHADOW' else 1)))
+    file.write(struct.pack("<H", (0 if light.shadow_method == 'NOSHADOW' else 1)))
     
     if light.shadow_method != 'NOSHADOW':
       shadow_color = (light.shadow_color[0],light.shadow_color[1], light.shadow_color[2], 1.0)
-      file.write(struct.pack("ffff", *shadow_color))
-      file.write(struct.pack("f", light.shadow_soft_size))
+      file.write(struct.pack("<ffff", *shadow_color))
+      file.write(struct.pack("<f", light.shadow_soft_size))
     
     if light.type == 'POINT' or light.type == 'SPOT' or light.type == 'AREA':
-      file.write(struct.pack("f", light.distance))
+      file.write(struct.pack("<f", light.distance))
       
     if light.type == 'SPOT':
       inner_angle_percent = 1.0 - light.spot_blend
       real_angle = (light.spot_size / 3.14159) * 180.0
-      file.write(struct.pack("f", real_angle))
-      file.write(struct.pack("f", real_angle * inner_angle_percent))
+      file.write(struct.pack("<f", real_angle))
+      file.write(struct.pack("<f", real_angle * inner_angle_percent))
     elif light.type == 'AREA':
       if light.shape == 'RECTANGLE':
-        file.write(struct.pack("ff", light.size, light.size_y))
+        file.write(struct.pack("<ff", light.size, light.size_y))
       else:
-        file.write(struct.pack("ff", light.size, light.size))
+        file.write(struct.pack("<ff", light.size, light.size))
     # close chunk
     close_chunk(file, ptr)
 
@@ -221,17 +221,17 @@ def write_speaker_chunk(file, speaker):
   # write chunk
   ptr = create_chunk(file, "AUDS", 1, get_uuid())
   
-  file.write(struct.pack("fff", speaker.volume, speaker.pitch, speaker.attenuation))
-  file.write(struct.pack("ff", speaker.volume_min, speaker.volume_max))
-  file.write(struct.pack("ff", speaker.distance_reference, speaker.distance_max))
-  file.write(struct.pack("ff", speaker.cone_angle_outer, speaker.cone_angle_inner))
+  file.write(struct.pack("<fff", speaker.volume, speaker.pitch, speaker.attenuation))
+  file.write(struct.pack("<ff", speaker.volume_min, speaker.volume_max))
+  file.write(struct.pack("<ff", speaker.distance_reference, speaker.distance_max))
+  file.write(struct.pack("<ff", speaker.cone_angle_outer, speaker.cone_angle_inner))
   
-  file.write(struct.pack("H", (1 if speaker.muted else 0)))
+  file.write(struct.pack("<H", (1 if speaker.muted else 0)))
     
   if speaker.sound is not None:
-    file.write(struct.pack("i", sound_map[speaker.sound.name]))
+    file.write(struct.pack("<I", sound_map[speaker.sound.name]))
   else:
-    file.write(struct.pack("i", -1))
+    file.write(struct.pack("<I", -1))
   
   close_chunk(file, ptr)
   
@@ -241,21 +241,21 @@ def write_scene_chunk(file, world):
   
   write_string(file, world.name)
   
-  file.write(struct.pack("ffff", world.ambient_color[0], world.ambient_color[1], world.ambient_color[2], 1.0)) #ambient
-  file.write(struct.pack("ffff", world.zenith_color[0], world.zenith_color[1], world.zenith_color[2], 1.0)) #sky
-  file.write(struct.pack("ffff", world.horizon_color[0], world.horizon_color[1], world.horizon_color[2], 1.0)) #horizon
+  file.write(struct.pack("<ffff", world.ambient_color[0], world.ambient_color[1], world.ambient_color[2], 1.0)) #ambient
+  file.write(struct.pack("<ffff", world.zenith_color[0], world.zenith_color[1], world.zenith_color[2], 1.0)) #sky
+  file.write(struct.pack("<ffff", world.horizon_color[0], world.horizon_color[1], world.horizon_color[2], 1.0)) #horizon
   
   # write fog only if enabled
-  file.write(struct.pack("H", (1 if world.mist_settings.use_mist else 0)))
+  file.write(struct.pack("<H", (1 if world.mist_settings.use_mist else 0)))
   if world.mist_settings.use_mist:
-    file.write(struct.pack("ffff", world.horizon_color[0], world.horizon_color[1], world.horizon_color[2], 1.0)) #fog
+    file.write(struct.pack("<ffff", world.horizon_color[0], world.horizon_color[1], world.horizon_color[2], 1.0)) #fog
     
-    file.write(struct.pack("ffff", world.mist_settings.intensity, 
+    file.write(struct.pack("<ffff", world.mist_settings.intensity, 
                                    world.mist_settings.start, 
                                    world.mist_settings.depth, 
                                    world.mist_settings.height))
                                    
-    file.write(struct.pack("H", (1 if world.mist_settings.falloff == 'QUADRATIC' else 0))) #type
+    file.write(struct.pack("<H", (1 if world.mist_settings.falloff == 'QUADRATIC' else 0))) #type
   
   close_chunk(file, ptr)
   
@@ -268,15 +268,15 @@ def write_object_chunk(file, ob):
   
   write_string(file, ob.name)
   rotation_radians = ob.matrix_world.to_euler()
-  file.write(struct.pack("fff", *ob.matrix_local.to_translation()))
-  file.write(struct.pack("fff", math.degrees(rotation_radians[0]), math.degrees(rotation_radians[1]), math.degrees(rotation_radians[2])))
-  file.write(struct.pack("fff", *ob.scale))
+  file.write(struct.pack("<fff", *ob.matrix_local.to_translation()))
+  file.write(struct.pack("<fff", math.degrees(rotation_radians[0]), math.degrees(rotation_radians[1]), math.degrees(rotation_radians[2])))
+  file.write(struct.pack("<fff", *ob.scale))
   
   # write parent
   if ob.parent is not None:
-    file.write(struct.pack("I", object_map[ob.parent.name]))
+    file.write(struct.pack("<I", object_map[ob.parent.name]))
   else:
-    file.write(struct.pack("I", 0))
+    file.write(struct.pack("<I", 0))
     
   # create layer mask
   layer_mask = 0
@@ -284,10 +284,10 @@ def write_object_chunk(file, ob):
     if ob.layers[layer_num]:
       layer_mask |= (1<<layer_num)
       
-  file.write(struct.pack("I", layer_mask))
+  file.write(struct.pack("<I", layer_mask))
   
   # wrtie visible state and selected state
-  file.write(struct.pack("HH", (1 if ob.is_visible(bpy.context.scene) else 0), (1 if ob.select else 0)))
+  file.write(struct.pack("<HH", (1 if ob.is_visible(bpy.context.scene) else 0), (1 if ob.select else 0)))
   
   # write datablocks
   datablock_count = 0
@@ -305,16 +305,16 @@ def write_object_chunk(file, ob):
       datablock_count += 1
       material_datablock_ids.append(material_map[ms.material.name])
   
-  file.write(struct.pack("H", datablock_count)) #datablock count
+  file.write(struct.pack("<H", datablock_count)) #datablock count
   
   # write material datablocks
   for matid in material_datablock_ids:
-    file.write(struct.pack("I", matid))
+    file.write(struct.pack("<I", matid))
   
   # write modifier datablocks
   if export_options["MODIFIER_MODE"] == 'preserve':
     for mod in ob.modifiers:
-      file.write(struct.pack("I", modifier_map[ob.name + "_" + mod.name]))
+      file.write(struct.pack("<I", modifier_map[ob.name + "_" + mod.name]))
   
   # write "concrete" datablock
   map = None
@@ -332,23 +332,23 @@ def write_object_chunk(file, ob):
     map = armature_map
   
   if map is not None:
-    file.write(struct.pack("I", map[ob.data.name]))
+    file.write(struct.pack("<I", map[ob.data.name]))
   
   # write rigidbody datablock
   if ob.rigid_body is not None:
-    file.write(struct.pack("I", rigidbody_map[ob.name]))
+    file.write(struct.pack("<I", rigidbody_map[ob.name]))
   
   # write vertex_group datablock
   if len(ob.vertex_groups) > 0:
-    file.write(struct.pack("I", vertex_group_map[ob.name]))
+    file.write(struct.pack("<I", vertex_group_map[ob.name]))
   
   # write animation datablock
   if ob.animation_data is not None and ob.animation_data.action is not None: 
-    file.write(struct.pack("I", action_map[ob.animation_data.action.name]))
+    file.write(struct.pack("<I", action_map[ob.animation_data.action.name]))
     
   # write user data datablock
   if len(ob.keys()) > 0:
-    file.write(struct.pack("I", userdata_map[ob.name]))
+    file.write(struct.pack("<I", userdata_map[ob.name]))
   
   # close chunk
   close_chunk(file, ptr)
@@ -357,17 +357,17 @@ def write_camera_chunk(file, camera):
   # write chunk
   ptr = create_chunk(file, "CAMR", 1, get_uuid())
   
-  file.write(struct.pack("H", (0 if camera.type == 'ORTHO' else 1)))
-  file.write(struct.pack("ff", camera.clip_start, camera.clip_end))
+  file.write(struct.pack("<H", (0 if camera.type == 'ORTHO' else 1)))
+  file.write(struct.pack("<ff", camera.clip_start, camera.clip_end))
   
   if camera.type == 'ORTHO':
-    file.write(struct.pack("f", camera.ortho_scale))
+    file.write(struct.pack("<f", camera.ortho_scale))
   else:
     real_fov = (camera.angle / 3.01675) * 172.847
-    file.write(struct.pack("f", real_fov))
+    file.write(struct.pack("<f", real_fov))
     
   aspect_ratio = camera.sensor_width / camera.sensor_height
-  file.write(struct.pack("f", aspect_ratio))
+  file.write(struct.pack("<f", aspect_ratio))
   
   close_chunk(file, ptr)
 
@@ -399,10 +399,10 @@ def write_texture_chunk(file, texture):
     else:
       file.write(truncate_format_string(texture.image.file_format).encode('ascii'))
     
-    file.write(struct.pack("H", texture.image.depth))
+    file.write(struct.pack("<H", texture.image.depth))
     
     # embed?
-    file.write(struct.pack("H", (1 if export_options["EMBED_TEXTURES"] else 0)))
+    file.write(struct.pack("<H", (1 if export_options["EMBED_TEXTURES"] else 0)))
     if export_options["EMBED_TEXTURES"]:
       # get our image binary  data
       image_data = None
@@ -416,7 +416,7 @@ def write_texture_chunk(file, texture):
       
       # write it
       image_len = len(image_data)
-      file.write(struct.pack("I", image_len))
+      file.write(struct.pack("<I", image_len))
       file.write(image_data)
       
       # add padding if we need it
@@ -427,7 +427,7 @@ def write_texture_chunk(file, texture):
   else:
     write_string(file, "null")
     file.write("null".encode("ascii"))
-    file.write(struct.pack("HH", 0, 0))
+    file.write(struct.pack("<HH", 0, 0))
   
   close_chunk(file, ptr)
   
@@ -451,26 +451,26 @@ def write_material_chunk(file, material):
   specular_hardness = (material.specular_hardness - 1) / 511
   
   # write rest
-  file.write(struct.pack("ffff", *diffuse_color))
-  file.write(struct.pack("ffff", *specular_color))
-  file.write(struct.pack("ffff", 0.0, 0.0, 0.0, 1.0))
-  file.write(struct.pack("ffff", 0.0, 0.0, 0.0, 1.0))
+  file.write(struct.pack("<ffff", *diffuse_color))
+  file.write(struct.pack("<ffff", *specular_color))
+  file.write(struct.pack("<ffff", 0.0, 0.0, 0.0, 1.0))
+  file.write(struct.pack("<ffff", 0.0, 0.0, 0.0, 1.0))
   
-  file.write(struct.pack("f", specular_hardness))
-  file.write(struct.pack("f", material.ambient))
+  file.write(struct.pack("<f", specular_hardness))
+  file.write(struct.pack("<f", material.ambient))
   
   # full emission if shadeless
   if material.use_shadeless:
-    file.write(struct.pack("f", 1.0))
+    file.write(struct.pack("<f", 1.0))
   else:
-    file.write(struct.pack("f", material.emit))
+    file.write(struct.pack("<f", material.emit))
     
-  file.write(struct.pack("f", material.specular_ior))
+  file.write(struct.pack("<f", material.specular_ior))
   
   # write textures
   num_textures = 0
   texture_ptr = file.tell()
-  file.write(struct.pack("I", 0))
+  file.write(struct.pack("<I", 0))
   
   for slot in material.texture_slots:
     if slot is not None and slot.texture is not None and slot.use:
@@ -511,7 +511,7 @@ def write_material_chunk(file, material):
   
   # go back and write num textures
   file.seek(texture_ptr)
-  file.write(struct.pack("I", num_textures))
+  file.write(struct.pack("<I", num_textures))
   file.seek(0, 2)
   
   close_chunk(file, ptr)
@@ -522,11 +522,15 @@ def write_mesh_chunk(file, mesh):
   
   write_string(file, mesh.name)
   
+  # write mesh info
+  file.write(struct.pack("<H", (1 if mesh.use_auto_smooth else 0)))
+  file.write(struct.pack("<H", (1 if len(mesh.vertices) <= 65535 else 0)))
+  
   # write bounding box
   bbox_min, bbox_max, bbox_center = bounds(mesh)
-  file.write(struct.pack("fff", *bbox_min))
-  file.write(struct.pack("fff", *bbox_max))
-  file.write(struct.pack("fff", *bbox_center))
+  file.write(struct.pack("<fff", *bbox_min))
+  file.write(struct.pack("<fff", *bbox_max))
+  file.write(struct.pack("<fff", *bbox_center))
   
   # load up bmesh data
   bm = bmesh.new()
@@ -563,28 +567,27 @@ def write_mesh_chunk(file, mesh):
       tag_list.append("SEAM")
   
   # write tag list
-  file.write(struct.pack("H", len(tag_list)))
+  file.write(struct.pack("<H", len(tag_list)))
   for tag in tag_list:
     write_string(file, tag)
   
   # write and gather color and uv layers
-  file.write(struct.pack("HH", len(mesh.uv_layers), len(mesh.vertex_colors)))
+  file.write(struct.pack("<HH", len(mesh.uv_layers), len(mesh.vertex_colors)))
   bm_uv_layers = []
   bm_vc_layers = []
   
   for uv_layer in mesh.uv_layers:
     write_string(file, uv_layer.name)
-    file.write(struct.pack("H", (1 if mesh.uv_layers.active.name == uv_layer.name else 0)))
+    file.write(struct.pack("<H", (1 if mesh.uv_layers.active.name == uv_layer.name else 0)))
     bm_uv_layers.append(bm.loops.layers.uv.get(uv_layer.name))
     
   for vc_layer in mesh.vertex_colors:
     write_string(file, vc_layer.name)
-    file.write(struct.pack("H", (1 if vc_layer.active_render else 0)))
+    file.write(struct.pack("<H", (1 if vc_layer.active_render else 0)))
     bm_vc_layers.append(bm.loops.layers.color.get(vc_layer.name))
   
   
   # gather tag links
-  num_tag_links = 0
   tag_links = []
   
   for edge in export_edges:
@@ -597,21 +600,21 @@ def write_mesh_chunk(file, mesh):
   num_verts = len(bm.verts)
   compact_indices = (num_verts <= 65535) # if we have less than 65535 verts, use short instead of long  
   
-  file.write(struct.pack("I", len(tag_links)))
+  file.write(struct.pack("<I", len(tag_links)))
   for link in tag_links:
-    file.write(struct.pack("HH", link[0], link[1])) #type, ID
+    file.write(struct.pack("<HH", link[0], link[1])) #type, ID
     file.write(struct.pack(("H" if compact_indices else "I"), link[2])) # index in list of vert/edge/face
     
   
   # write geometry
-  file.write(struct.pack("III", num_verts, len(export_edges), max(len(mesh.materials), 1)))
+  file.write(struct.pack("<III", num_verts, len(export_edges), max(len(mesh.materials), 1)))
   for vert in bm.verts:
-    file.write(struct.pack("fff", vert.co[0], vert.co[1], vert.co[2]))
-    file.write(struct.pack("fff", vert.normal[0], vert.normal[1], vert.normal[2]))
+    file.write(struct.pack("<fff", vert.co[0], vert.co[1], vert.co[2]))
+    file.write(struct.pack("<fff", vert.normal[0], vert.normal[1], vert.normal[2]))
   
   for edge in export_edges:
     file.write(struct.pack(("HH" if compact_indices else "II"), edge.verts[0].index, edge.verts[1].index))
-    file.write(struct.pack("f", crease))
+    file.write(struct.pack("<f", crease))
   
   # gather num faces on each mat
   num_materials = max(len(mesh.materials), 1)
@@ -642,11 +645,11 @@ def write_mesh_chunk(file, mesh):
         prim_map[num_sides] += 1
     
     #write facecontainer 
-    file.write(struct.pack("H", len(prim_map)))
+    file.write(struct.pack("<H", len(prim_map)))
     
     # write primgroups
     for key in prim_map:
-      file.write(struct.pack("IH", prim_map[key], key))
+      file.write(struct.pack("<IH", prim_map[key], key))
       
       # write faces for prim group
       for face in bm.faces:
@@ -659,10 +662,10 @@ def write_mesh_chunk(file, mesh):
           file.write(struct.pack(("H" if compact_indices else "I"), loop.vert.index))
           for uv_layer in bm_uv_layers:
             uv_loop = loop[uv_layer]
-            file.write(struct.pack("ff", uv_loop.uv[0], uv_loop.uv[1]))
+            file.write(struct.pack("<ff", uv_loop.uv[0], uv_loop.uv[1]))
           for vc_layer in bm_vc_layers:
             vc_loop = loop[vc_layer]
-            file.write(struct.pack("ffff", vc_loop[0], vc_loop[1], vc_loop[2], 1.0))
+            file.write(struct.pack("<ffff", vc_loop[0], vc_loop[1], vc_loop[2], 1.0))
    
   # release resources
   bm.free()
@@ -673,16 +676,16 @@ def write_rigidbody_chunk(file, rigidbody):
   # write chunk
   ptr = create_chunk(file, "RGDB", 1, get_uuid())
   
-  file.write(struct.pack("fffff", rigidbody.mass, 
+  file.write(struct.pack("<fffff", rigidbody.mass, 
                                   rigidbody.linear_damping, 
                                   rigidbody.angular_damping, 
                                   rigidbody.friction, rigidbody.
                                   restitution))
   
-  file.write(struct.pack("HH", (1 if rigidbody.kinematic else 0), (1 if rigidbody.use_start_deactivated else 0)))
+  file.write(struct.pack("<HH", (1 if rigidbody.kinematic else 0), (1 if rigidbody.use_start_deactivated else 0)))
   
   prim_type = rigidbody_shape_dict.get(rigidbody.collision_shape, 0)
-  file.write(struct.pack("H", prim_type))
+  file.write(struct.pack("<H", prim_type))
   
   close_chunk(file, ptr)
   
@@ -691,7 +694,7 @@ def write_spline_chunk(file, curve):
   ptr = create_chunk(file, "SPLN", 1, get_uuid())
   
   # write individual sub splines
-  file.write(struct.pack("I", len(curve.splines)))
+  file.write(struct.pack("<I", len(curve.splines)))
   for sub_spline in curve.splines:
     # get type
     type = curve_type_dict.get(sub_spline.type, 0)
@@ -700,16 +703,16 @@ def write_spline_chunk(file, curve):
     tilt_type = curve_tilt_dict.get(sub_spline.tilt_interpolation, 0)
       
     # write spline data (finally)
-    file.write(struct.pack("HH", type, tilt_type))
+    file.write(struct.pack("<HH", type, tilt_type))
     
     point_source = sub_spline.bezier_points if sub_spline.type == 'BEZIER' else sub_spline.points
-    file.write(struct.pack("I", len(point_source)))
+    file.write(struct.pack("<I", len(point_source)))
     for point in point_source:
-      file.write(struct.pack("fff", point.co[0], point.co[1], point.co[2]))
-      file.write(struct.pack("fff", point.radius, point.tilt, (point.weight if sub_spline.type != 'BEZIER' else 0.0)))
+      file.write(struct.pack("<fff", point.co[0], point.co[1], point.co[2]))
+      file.write(struct.pack("<fff", point.radius, point.tilt, (point.weight if sub_spline.type != 'BEZIER' else 0.0)))
       if sub_spline.type == 'BEZIER':
-        file.write(struct.pack("fff", point.handle_left[0], point.handle_left[1], point.handle_left[2]))
-        file.write(struct.pack("fff", point.handle_right[0], point.handle_right[1], point.handle_right[2]))
+        file.write(struct.pack("<fff", point.handle_left[0], point.handle_left[1], point.handle_left[2]))
+        file.write(struct.pack("<fff", point.handle_right[0], point.handle_right[1], point.handle_right[2]))
     
   
   close_chunk(file, ptr)
@@ -763,7 +766,7 @@ def write_vertex_group_chunk(file, object):
       for pair in sub_pairs:
         file.write(struct.pack("<II", *pair))
         for vert_index in range(pair[0], pair[1] + 1):
-          file.write(struct.pack("f", group.weight(vert_index)))
+          file.write(struct.pack("<f", group.weight(vert_index)))
       
       
     
@@ -774,7 +777,7 @@ def write_vertex_group_chunk(file, object):
 def write_file_chunk(file):
   ptr = create_chunk(file, "FILE", 1, get_uuid())
   
-  file.write(struct.pack("H",1)) # feature set 1
+  file.write(struct.pack("<H",1)) # feature set 1
   
   close_chunk(file, ptr)
   
@@ -790,7 +793,7 @@ def write_anim_chunk(file, anim):
   
   # write header
   curve_count = len(anim.fcurves)
-  file.write(struct.pack("ffI", 
+  file.write(struct.pack("<ffI", 
                          anim.frame_range[0] / frame_divisor, 
                          anim.frame_range[1] / frame_divisor,
                          curve_count))
@@ -805,8 +808,8 @@ def write_anim_chunk(file, anim):
     
     # write curve header
     write_string(file, data_path)
-    file.write(struct.pack("H", 0)) # value type = 0 (float)
-    file.write(struct.pack("I", len(keyframes))) # keyframes
+    file.write(struct.pack("<H", 0)) # value type = 0 (float)
+    file.write(struct.pack("<I", len(keyframes))) # keyframes
     # write keyframes
     for kf in keyframes:
       # calculate keyframe data
@@ -822,13 +825,12 @@ def write_anim_chunk(file, anim):
       else:
         kf_interpolation_type = 2
       
-      
+      # ?? I have no idea
       if curve.data_path == "rotation_euler":
         kf_value = math.degrees(kf_value)
       
       # write keyframe data
-      file.write(struct.pack("ffffH", kf_time / frame_divisor, kf_in_tangent, kf_out_tangent, kf_interpolation_type, kf_value))
-      
+      file.write(struct.pack("<fffHf", kf_time / frame_divisor, kf_in_tangent, kf_out_tangent, kf_interpolation_type, kf_value))
     
   # finish off
   close_chunk(file, ptr)
@@ -857,9 +859,9 @@ def write_armature_chunk(file, armature):
     else:
       file.write(struct.pack('<h', -1)) # root
     
-    file.write(struct.pack("fff", *bone.head_local))
-    file.write(struct.pack("fff", *bone.tail_local))
-    file.write(struct.pack("f", 0)) # TODO : USE EDIT BONE ROLL
+    file.write(struct.pack("<fff", *bone.head_local))
+    file.write(struct.pack("<fff", *bone.tail_local))
+    file.write(struct.pack("<f", 0)) # TODO : USE EDIT BONE ROLL
     
   close_chunk(file, ptr)
   
@@ -880,7 +882,7 @@ def get_heirarchy_level(ob):
 def angle2d(p1, p2):
     s = p1[0] * p2[1] - p2[0] * p1[1] 
     c = p1[0] * p2[0] + p1[1] * p2[1]
-    return math.atan2(sin, cos)
+    return math.atan2(s, c)
 
     
 def translate_data_path(path):
@@ -960,9 +962,9 @@ def truncate_format_string(format):
 
 
 def write_texture_reference(file, texture, mapping, multiplier, blend_type):
-    file.write(struct.pack("I", texture_map[texture.name]))
-    file.write(struct.pack("HH", mapping, blend_type))
-    file.write(struct.pack("f", multiplier))
+    file.write(struct.pack("<I", texture_map[texture.name]))
+    file.write(struct.pack("<HH", mapping, blend_type))
+    file.write(struct.pack("<f", multiplier))
 
     
 def write_string(file, strng):
@@ -993,7 +995,7 @@ def create_chunk(file, type, version, id):
     
     # write INFO chunk
     file.write("INFO".encode("ascii"))
-    file.write(struct.pack("III", 8, version, id)) #8 length for 2 ints
+    file.write(struct.pack("<III", 8, version, id)) #8 length for 2 ints
 
     # write DATA chunk header
     file.write("DATAxxxx".encode("ascii"))
@@ -1009,11 +1011,11 @@ def close_chunk(file, ptr):
     
     # write LIST length
     file.seek(ptr + 4)
-    file.write(struct.pack("I", list_length))
+    file.write(struct.pack("<I", list_length))
     
     # write DATA length
     file.seek(24, 1)
-    file.write(struct.pack("I", data_length))
+    file.write(struct.pack("<I", data_length))
     
     # seek back to end
     file.seek(0, 2)
@@ -1198,7 +1200,7 @@ def export_scene(file):
     #finish off
     file_length = file.tell()
     file.seek(4)
-    file.write(struct.pack("I", file_length - 8))
+    file.write(struct.pack("<I", file_length - 8))
 
 ######################################################
 # EXPORT

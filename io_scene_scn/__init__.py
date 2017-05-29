@@ -58,7 +58,7 @@ class ExportSCN(bpy.types.Operator, ExportHelper):
     
     # export things
     modifier_mode = bpy.props.EnumProperty(name="Modifier Mode", 
-                                           items = (('preserve', 'Export Modifiers',''), ('apply','Apply Before Export','')),
+                                           items = (('preserve', 'Export Modifiers',''), ('apply','Apply Before Export',''), ('noapply', 'Do Nothing', '')),
                                            default='preserve')
     
         
