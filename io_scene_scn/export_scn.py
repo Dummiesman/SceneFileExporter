@@ -434,7 +434,7 @@ def write_texture_chunk(file, texture):
   
 def write_material_chunk(file, material):
   # write chunk
-  ptr = create_chunk(file, "MTRL", 1, get_uuid())
+  ptr = create_chunk(file, "MTRL", 2, get_uuid())
   
   write_string(file, material.name) # write name
   
@@ -479,34 +479,34 @@ def write_material_chunk(file, material):
         
       # write stuff about this texture (TODO: clean)
       if slot.use_map_color_diffuse:
-        write_texture_reference(file, slot.texture, 0, slot.diffuse_color_factor, blend_mode) #diffuse.color
+        write_texture_reference(file, slot.texture, 0, slot.diffuse_color_factor, blend_mode, slot.offset, slot.scale) #diffuse.color
         num_textures += 1
       if slot.use_map_diffuse:
-        write_texture_reference(file, slot.texture, 1, slot.diffuse_factor, blend_mode) #diffuse.intensity
+        write_texture_reference(file, slot.texture, 1, slot.diffuse_factor, blend_mode, slot.offset, slot.scale) #diffuse.intensity
         num_textures += 1
       if slot.use_map_color_spec:
-        write_texture_reference(file, slot.texture, 2, slot.specular_color_factor, blend_mode) #specular.color
+        write_texture_reference(file, slot.texture, 2, slot.specular_color_factor, blend_mode, slot.offset, slot.scale) #specular.color
         num_textures += 1
       if slot.use_map_specular:
-        write_texture_reference(file, slot.texture, 3, slot.specular_factor, blend_mode) #specular.intensity
+        write_texture_reference(file, slot.texture, 3, slot.specular_factor, blend_mode, slot.offset, slot.scale) #specular.intensity
         num_textures += 1
       if slot.use_map_hardness:
-        write_texture_reference(file, slot.texture, 4, slot.hardness_factor, blend_mode) #specular.hardness
+        write_texture_reference(file, slot.texture, 4, slot.hardness_factor, blend_mode, slot.offset, slot.scale) #specular.hardness
         num_textures += 1
       if slot.use_map_displacement:
-        write_texture_reference(file, slot.texture, 6, slot.displacement_factor, blend_mode) #displacement
+        write_texture_reference(file, slot.texture, 6, slot.displacement_factor, blend_mode, slot.offset, slot.scale) #displacement
         num_textures += 1
       if slot.use_map_ambient:
-        write_texture_reference(file, slot.texture, 8, slot.ambient_factor, blend_mode) #ambient
+        write_texture_reference(file, slot.texture, 8, slot.ambient_factor, blend_mode, slot.offset, slot.scale) #ambient
         num_textures += 1
       if slot.use_map_translucency or slot.use_map_alpha:
-        write_texture_reference(file, slot.texture, 7, (slot.translucency_factor if slot.use_map_translucency else slot.alpha_factor), blend_mode) #translucency
+        write_texture_reference(file, slot.texture, 7, (slot.translucency_factor if slot.use_map_translucency else slot.alpha_factor), blend_mode, slot.offset, slot.scale) #translucency
         num_textures += 1
       if slot.use_map_normal:
-        write_texture_reference(file, slot.texture, 12, slot.normal_factor, blend_mode) #normalmap
+        write_texture_reference(file, slot.texture, 12, slot.normal_factor, blend_mode, slot.offset, slot.scale) #normalmap
         num_textures += 1
       if slot.use_map_emit:
-        write_texture_reference(file, slot.texture, 9, slot.emit_factor, blend_mode) #emission
+        write_texture_reference(file, slot.texture, 9, slot.emit_factor, blend_mode, slot.offset, slot.scale) #emission
         num_textures += 1  
   
   # go back and write num textures
@@ -825,7 +825,7 @@ def write_anim_chunk(file, anim):
       else:
         kf_interpolation_type = 2
       
-      # ?? I have no idea
+      # special case: convert from radians to degrees (I got it, I figured it out!)
       if curve.data_path == "rotation_euler":
         kf_value = math.degrees(kf_value)
       
@@ -961,10 +961,12 @@ def truncate_format_string(format):
       return format
 
 
-def write_texture_reference(file, texture, mapping, multiplier, blend_type):
+def write_texture_reference(file, texture, mapping, multiplier, blend_type, offset, scale):
     file.write(struct.pack("<I", texture_map[texture.name]))
     file.write(struct.pack("<HH", mapping, blend_type))
     file.write(struct.pack("<f", multiplier))
+    file.write(struct.pack("<ff", offset[0], offset[1]))
+    file.write(struct.pack("<ff", scale[0], scale[1]))
 
     
 def write_string(file, strng):
