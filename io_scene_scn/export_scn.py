@@ -60,6 +60,21 @@ modifier_type_dict = {'EDGE_SPLIT': 0, 'MIRROR': 1, 'SUBSURF': 2, 'ARRAY': 3, 'B
 boolean_operator_dict = {'INTERSECT': 0, 'UNION': 1, 'DIFFERENCE': 2}
 
 ######################################################
+# VERIFICATION FUNCTIONS
+######################################################
+def verify_object_type(ob):
+  if ob.type != 'LAMP' and ob.type != 'SPEAKER' and ob.type != 'EMPTY' and ob.type != 'CAMERA' and ob.type != 'MESH' and ob.type != 'CURVE' and ob.type != 'ARMATURE':
+    return False
+  return True
+
+  
+def verify_constraint_type(constraint):
+  if constraint.type != 'FIXED' and constraint.type != 'HINGE' and constraint.type != 'GENERIC_SPRING' and constraint.type != 'MOTOR':
+    return False
+  return True
+  
+  
+######################################################
 # CHUNK FUNCTIONS
 ######################################################
 def write_modifier_chunk(file, modifier):
@@ -89,7 +104,7 @@ def write_modifier_chunk(file, modifier):
       if modifier.use_y:
         axis_id |= 2
       if modifier.use_z:
-        axis_id |= 3
+        axis_id |= 4
         
       file.write(struct.pack("<H", axis_id))
       
@@ -125,7 +140,7 @@ def write_modifier_chunk(file, modifier):
       
       # write offset or datablock id
       if modifier.use_object_offset:
-        file.write(struct.pack("<I", object_map.get(modifier.offset_object.name, -1)))
+        file.write(struct.pack("<i", object_map.get(modifier.offset_object.name, -1)))
       else:
         offset = [0.0, 0.0, 0.0]
         if modifier.use_relative_offset:
@@ -139,7 +154,7 @@ def write_modifier_chunk(file, modifier):
       if modifier.use_merge_vertices:
         file.write(struct.pack("<f", modifier.merge_threshold))
     elif modifier.type == 'BOOLEAN':
-      file.write(struct.pack("<I", object_map.get(modifier.object.name, -1)))
+      file.write(struct.pack("<i", object_map.get(modifier.object.name, -1)))
       file.write(struct.pack("<H", boolean_operator_dict.get(modifier.operation, 0)))
       file.write(struct.pack("<H", 0 if modifier.solver == 'CARVE' else 1))
       
@@ -209,11 +224,51 @@ def write_light_chunk(file, light):
     # close chunk
     close_chunk(file, ptr)
 
-def write_sound_chunk(file, sound):
+def write_sound_resource_chunk(file, sound):
   # write chunk
-  ptr = create_chunk(file, "AUDF", 1, get_uuid())
+  ptr = create_chunk(file, "RSRC", 1, get_uuid())
   
-  write_string(file, sound.filepath)
+  # get absolute path to the sound to use for later
+  sound_realpath = bpy.path.abspath(sound.filepath)
+  if export_options["EMBED_RESOURCES"]:
+    # write basename path if we're embedding textures, source path is useless
+    write_string(file, bpy.path.basename(sound_realpath))
+  else:
+    # write path to the image based on a user setting
+    if export_options["RELATIVITY"] == "blend":
+      write_string(file, bpy.path.relpath(sound_realpath)[2:])
+    elif export_options["RELATIVITY"] == "abs":
+      write_string(file, sound_realpath)
+    else:
+      write_string(file, bpy.path.relpath(sound_realpath, start=os.path.dirname(export_path))[2:])
+  
+  # write sound file extension
+  sound_extension = sound.filepath[-3:].upper() + " "
+  file.write(sound_extension.encode('ascii'))
+  
+  file.write(struct.pack("<H", 0)) # reserved
+  
+  # embed?
+  file.write(struct.pack("<H", (1 if export_options["EMBED_RESOURCES"] else 0)))
+  if export_options["EMBED_RESOURCES"]:
+    # get our image binary  data
+    sound_data = None
+    
+    if sound.packed_file is not None:
+      sound_data = texture.image.packed_file.data
+    else:
+      sound_file = open(sound_realpath, "rb")
+      sound_data = sound_file.read()
+      sound_file.close()
+    
+    # write it
+    sound_len = len(sound_data)
+    file.write(struct.pack("<I", sound_len))
+    file.write(sound_data)
+    
+    # add padding if we need it
+    if sound_len % 2 > 0:
+      file.write("\x00".encode("ascii"))
   
   close_chunk(file, ptr)
   
@@ -231,7 +286,7 @@ def write_speaker_chunk(file, speaker):
   if speaker.sound is not None:
     file.write(struct.pack("<I", sound_map[speaker.sound.name]))
   else:
-    file.write(struct.pack("<I", -1))
+    file.write(struct.pack("<i", -1))
   
   close_chunk(file, ptr)
   
@@ -260,7 +315,7 @@ def write_scene_chunk(file, world):
   close_chunk(file, ptr)
   
 def write_object_chunk(file, ob):
-  if ob.type != 'LAMP' and ob.type != 'SPEAKER' and ob.type != 'EMPTY' and ob.type != 'CAMERA' and ob.type != 'MESH' and ob.type != 'CURVE' and ob.type != 'ARMATURE':
+  if verify_object_type(ob) == False:
     return
     
   # write chunk
@@ -293,7 +348,8 @@ def write_object_chunk(file, ob):
   datablock_count = 0
   if export_options["MODIFIER_MODE"] == 'preserve': datablock_count += len(ob.modifiers)
   if ob.type != 'EMPTY':  datablock_count += 1
-  if ob.rigid_body is not None: datablock_count += 1
+  if ob.rigid_body is not None: datablock_count += 2
+  if ob.rigid_body_constraint is not None and verify_constraint_type(ob.rigid_body_constraint): datablock_count += 1
   if len(ob.vertex_groups) > 0: datablock_count += 1
   if len(ob.keys()) > 0: datablock_count += 1
   if ob.animation_data is not None and ob.animation_data.action is not None: datablock_count += 1
@@ -336,7 +392,11 @@ def write_object_chunk(file, ob):
   
   # write rigidbody datablock
   if ob.rigid_body is not None:
+    if ob.rigid_body_constraint is not None and  verify_constraint_type(ob.rigid_body_constraint):
+      file.write(struct.pack("<I", rigidbody_map[ob.name] - 2)) # constraint chunk written 2  chunks prior
+    file.write(struct.pack("<I", rigidbody_map[ob.name] - 1)) # collision chunk written prior
     file.write(struct.pack("<I", rigidbody_map[ob.name]))
+    
   
   # write vertex_group datablock
   if len(ob.vertex_groups) > 0:
@@ -372,15 +432,15 @@ def write_camera_chunk(file, camera):
   close_chunk(file, ptr)
 
   
-def write_texture_chunk(file, texture):
+def write_texture_resource_chunk(file, texture):
   # write chunk
-  ptr = create_chunk(file, "TXTR", 2, get_uuid())
+  ptr = create_chunk(file, "RSRC", 1, get_uuid())
   
   write_string(file, texture.name)
   if texture.type == 'IMAGE' and texture.image is not None:
     # get absolute path to the image to use for later
     image_realpath = bpy.path.abspath(texture.image.filepath)
-    if export_options["EMBED_TEXTURES"]:
+    if export_options["EMBED_RESOURCES"]:
       # write basename path if we're embedding textures, source path is useless
       write_string(file, bpy.path.basename(image_realpath))
     else:
@@ -399,11 +459,11 @@ def write_texture_chunk(file, texture):
     else:
       file.write(truncate_format_string(texture.image.file_format).encode('ascii'))
     
-    file.write(struct.pack("<H", texture.image.depth))
+    file.write(struct.pack("<H", texture.image.depth)) # reserved, in this case : depth
     
     # embed?
-    file.write(struct.pack("<H", (1 if export_options["EMBED_TEXTURES"] else 0)))
-    if export_options["EMBED_TEXTURES"]:
+    file.write(struct.pack("<H", (1 if export_options["EMBED_RESOURCES"] else 0)))
+    if export_options["EMBED_RESOURCES"]:
       # get our image binary  data
       image_data = None
       
@@ -478,6 +538,7 @@ def write_material_chunk(file, material):
       blend_mode = texture_blend_type_dict.get(slot.blend_type, 0)
         
       # write stuff about this texture (TODO: clean)
+      # TODO: REALLY CLEAN, It's gotten worse
       if slot.use_map_color_diffuse:
         write_texture_reference(file, slot.texture, 0, slot.diffuse_color_factor, blend_mode, slot.offset, slot.scale) #diffuse.color
         num_textures += 1
@@ -671,21 +732,38 @@ def write_mesh_chunk(file, mesh):
   bm.free()
   
   close_chunk(file, ptr)
+
+
+def write_collision_chunk(file, rigidbody):
+  # write chunk
+  ptr = create_chunk(file, "COLL", 1, get_uuid())
+  
+  prim_type = rigidbody_shape_dict.get(rigidbody.collision_shape, 0)
+  file.write(struct.pack("<H", prim_type))
+  file.write(struct.pack("ffffff", 0, 0, 0, 1, 1, 1))
+    
+  file.write(struct.pack("<ff", rigidbody.friction, rigidbody.restitution))
+  
+  # write mesh id if applicable
+  if prim_type >= 5:
+    rigidbody_parent = bpy.data.objects[rigidbody.id_data.name]
+    if rigidbody_parent.type == 'MESH':
+      file.write(struct.pack("<I", mesh_map[rigidbody_parent.data.name]))
+    else:
+      file.write(struct.pack("<i", -1))
+    
+  close_chunk(file, ptr)
+    
   
 def write_rigidbody_chunk(file, rigidbody):
   # write chunk
   ptr = create_chunk(file, "RGDB", 1, get_uuid())
   
-  file.write(struct.pack("<fffff", rigidbody.mass, 
+  file.write(struct.pack("<fff", rigidbody.mass, 
                                   rigidbody.linear_damping, 
-                                  rigidbody.angular_damping, 
-                                  rigidbody.friction, rigidbody.
-                                  restitution))
+                                  rigidbody.angular_damping,))
   
   file.write(struct.pack("<HH", (1 if rigidbody.kinematic else 0), (1 if rigidbody.use_start_deactivated else 0)))
-  
-  prim_type = rigidbody_shape_dict.get(rigidbody.collision_shape, 0)
-  file.write(struct.pack("<H", prim_type))
   
   close_chunk(file, ptr)
   
@@ -774,6 +852,94 @@ def write_vertex_group_chunk(file, object):
     close_chunk(file, ptr)    
     
 
+def write_constraint_info(file, constraint):
+  # write constraint info
+  file.write(struct.pack("<HH", (0 if constraint.disable_collisions else 1), (1 if constraint.use_breaking else 0)))
+  
+  # write break threshold
+  if constraint.use_breaking:
+    file.write(struct.pack("f", constraint.breaking_threshold))
+    
+
+def write_spring_joint_chunk(file, constraint):
+  ptr = create_chunk(file, "SJNT", 1, get_uuid())
+  
+  # spring joint specific
+  constraint_obj_id = -1 if constraint.object2 is None else object_map[constraint.object2.name]
+  file.write(struct.pack("<i", constraint_obj_id))
+  
+  file.write(struct.pack("fff", 0, 0, 0)) # local attachment point
+  
+  # compute avg spring damp and force
+  avg_spring_damp = (constraint.spring_damping_x, constraint.spring_damping_y, constraint.spring_damping_z) / 3
+  avg_spring_force = (constraint.spring_stiffness_x, constraint.spring_stiffness_y, constraint.spring_stiffness_z) / 3
+  
+  file.write(struct.pack("ff", avg_spring_force, avg_spring_damp))
+  
+  # write constraint shared info
+  write_constraint_info(file, constraint)
+  
+  close_chunk(file, ptr)
+  
+def write_fixed_joint_chunk(file, constraint):
+  ptr = create_chunk(file, "FJNT", 1, get_uuid())
+  
+  # fixed joint specific
+  constraint_obj_id = -1 if constraint.object2 is None else object_map[constraint.object2.name]
+  file.write(struct.pack("<i", constraint_obj_id))
+  
+  # write constraint shared info
+  write_constraint_info(file, constraint)
+  
+  close_chunk(file, ptr)
+
+  
+def write_hinge_joint_chunk(file, constraint):
+  ptr = create_chunk(file, "HJNT", 1, get_uuid())
+  
+  # hinge  joint specific
+  constraint_obj_id = -1 if constraint.object2 is None else object_map[constraint.object2.name]
+  file.write(struct.pack("<i", constraint_obj_id))
+  
+  file.write(struct.pack("fff", 0, 0, 0)) # local attachment point
+  
+  # calculate rotation axis
+  if constraint.object2 is None:
+    file.write(struct.pack("fff", 0, 0, 0)) # hinge axis, no reference to anything so 0,0,0
+  else:
+    parent_rotation = mathutils.Euler(constraint.object2.rotation_euler, 'XYZ').to_quaternion()
+    rotation_axis = None
+    if constraint.type == 'HINGE':
+      rotation_axis = parent_rotation * mathutils.Vector((0,0,1))
+    elif constraint.type == 'MOTOR':
+      rotation_axis = parent_rotation * mathutils.Vector((1,0,0))
+    file.write(struct.pack("fff", rotation_axis[0], rotation_axis[1], rotation_axis[2])) # hinge axis
+  
+  # rotation limits
+  file.write(struct.pack("H", (1 if constraint.use_limit_ang_z else 0)))
+  if constraint.use_limit_ang_z:
+    file.write(struct.pack("ff", math.degrees(constraint.limit_ang_z_lower), math.degrees(constraint.limit_ang_z_upper)))
+  
+  # motor specific
+  file.write(struct.pack("H", (1 if (constraint.type == 'MOTOR' and constraint.use_motor_ang) else 0)))
+  if constraint.type == 'MOTOR' and constraint.use_motor_ang:
+    file.write(struct.pack("ff", constraint.motor_ang_target_velocity, constraint.motor_ang_max_impulse))
+  
+  # write constraint shared info
+  write_constraint_info(file, constraint)
+  
+  close_chunk(file, ptr)
+
+  
+def write_constraint_chunk(file, constraint):
+  if constraint.type == 'HINGE' or constraint.type == 'MOTOR':
+    write_hinge_joint_chunk(file, constraint)
+  if constraint.type == 'GENERIC_SPRING':
+    write_spring_joint_chunk(file, constraint)
+  if constraint.type == 'FIXED':
+    write_fixed_joint_chunk(file, constraint)
+
+    
 def write_file_chunk(file):
   ptr = create_chunk(file, "FILE", 1, get_uuid())
   
@@ -1022,7 +1188,9 @@ def close_chunk(file, ptr):
     # seek back to end
     file.seek(0, 2)
 
-
+    
+def create_chunk_map():
+    return None
 ######################################################
 # EXPORT MAIN FILES
 ######################################################
@@ -1061,7 +1229,7 @@ def export_scene(file):
     sound_map = {}
     
     for snd in bpy.data.sounds:
-      write_sound_chunk(file, snd)
+      write_sound_resource_chunk(file, snd)
       sound_map[snd.name] = current_id
     
     # write speakers
@@ -1093,7 +1261,7 @@ def export_scene(file):
     texture_map = {}
     
     for txtr in bpy.data.textures:
-      write_texture_chunk(file, txtr)
+      write_texture_resource_chunk(file, txtr)
       texture_map[txtr.name] = current_id
     
     # write materials
@@ -1156,25 +1324,49 @@ def export_scene(file):
         write_meta_chunk(file, userdata, "USER")
         userdata_map[ob.name] = current_id
         
-    # write rigidbodies
-    global rigidbody_map
-    rigidbody_map = {}
-    
-    for ob in bpy.data.objects:
-      if ob.rigid_body is not None:
-        write_rigidbody_chunk(file, ob.rigid_body)
-        rigidbody_map[ob.name] = current_id
-    
-    # write objects
-    global object_map, vertex_group_map, modifier_map
+    ###################
+    #create object map#
+    ###################
+    global object_map
     object_map = {}
-    vertex_group_map = {}
-    modifier_map = {}
+    fake_id = current_id
     
     #first, get the highest heirarchy level
     heirarchy_max_level = 0
     for ob in bpy.data.objects:
       heirarchy_max_level = max(heirarchy_max_level, get_heirarchy_level(ob))
+      
+    # then map unparented objects, then unparented
+    for level in range(heirarchy_max_level + 1):
+      for ob in bpy.data.objects:
+        # proper level?
+        if get_heirarchy_level(ob) != level:
+          continue
+        
+        if ob.rigid_body is not None:
+          if ob.rigid_body_constraint is not None and verify_constraint_type(ob.rigid_body_constraint):
+            fake_id += 1
+          fake_id += 2
+        
+        if len(ob.vertex_groups) > 0:
+          fake_id += 1
+          
+        # write modifier chunks
+        if export_options["MODIFIER_MODE"] == 'preserve':
+          for mod in ob.modifiers:
+            fake_id += 1
+            
+        # map object  
+        fake_id += 1
+        object_map[ob.name] = fake_id
+    
+    ######################
+    # write objects last #
+    ######################
+    global vertex_group_map, modifier_map, rigidbody_map
+    rigidbody_map = {}
+    vertex_group_map = {}
+    modifier_map = {}
     
     # first write unparented objects, then unparented
     for level in range(heirarchy_max_level + 1):
@@ -1184,6 +1376,15 @@ def export_scene(file):
           continue
           
         print("...writing object " + ob.name)
+        
+        # write the rigidbody chunk
+        if ob.rigid_body is not None:
+          if ob.rigid_body_constraint is not None and verify_constraint_type(ob.rigid_body_constraint):
+            write_constraint_chunk(file, ob.rigid_body_constraint)
+          write_collision_chunk(file, ob.rigid_body)
+          write_rigidbody_chunk(file, ob.rigid_body)
+          rigidbody_map[ob.name] = current_id
+        
         # write the vertex group chunk for me!! :)
         if len(ob.vertex_groups) > 0:
           write_vertex_group_chunk(file, ob)
@@ -1225,8 +1426,8 @@ def save_scn(filepath,
 def save(operator,
          context,
          filepath="",
-         embed_textures=False,
-         texture_path_mode=None,
+         embed_resources=False,
+         resource_path_mode=None,
          modifier_mode = 'apply',
          ):
     
@@ -1235,8 +1436,8 @@ def save(operator,
     export_path = filepath
     export_options = {}
     
-    export_options["EMBED_TEXTURES"] = embed_textures
-    export_options["RELATIVITY"] = texture_path_mode
+    export_options["EMBED_RESOURCES"] = embed_resources
+    export_options["RELATIVITY"] = resource_path_mode
     export_options["MODIFIER_MODE"] = modifier_mode
     
     # save it
@@ -1245,3 +1446,4 @@ def save(operator,
              )
 
     return {'FINISHED'}
+
