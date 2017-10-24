@@ -350,10 +350,11 @@ def write_object_chunk(file, ob):
   if ob.type != 'EMPTY':  datablock_count += 1
   if ob.rigid_body is not None: datablock_count += 2
   if ob.rigid_body_constraint is not None and verify_constraint_type(ob.rigid_body_constraint): datablock_count += 1
-  if len(ob.vertex_groups) > 0: datablock_count += 1
+  if len(ob.vertex_groups) > 0: datablock_count += len(ob.vertex_groups)
   if len(ob.keys()) > 0: datablock_count += 1
   if ob.animation_data is not None and ob.animation_data.action is not None: datablock_count += 1
-
+  if ob.type == 'CURVE': datablock_count += len(ob.data.splines)
+  
   # gather material datablocks
   material_datablock_ids = []
   for ms in ob.material_slots:
@@ -382,8 +383,6 @@ def write_object_chunk(file, ob):
     map = camera_map
   elif ob.type == 'MESH':
     map = mesh_map
-  elif ob.type == 'CURVE':
-    map = curve_map
   elif ob.type == 'ARMATURE':
     map = armature_map
   
@@ -397,10 +396,15 @@ def write_object_chunk(file, ob):
     file.write(struct.pack("<I", rigidbody_map[ob.name] - 1)) # collision chunk written prior
     file.write(struct.pack("<I", rigidbody_map[ob.name]))
     
+  # write spline datablocks
+  if ob.type == 'CURVE':
+    for cspline in len(ob.data.splines):
+      file.write(struct.pack("<I", curve_map[ob.data.name + "_SCN_EXPORT_ID_" + str(cspline)]))
   
   # write vertex_group datablock
   if len(ob.vertex_groups) > 0:
-    file.write(struct.pack("<I", vertex_group_map[ob.name]))
+    for group in ob.vertex_groups:
+      file.write(struct.pack("<I", vertex_group_map[group.name]))
   
   # write animation datablock
   if ob.animation_data is not None and ob.animation_data.action is not None: 
@@ -420,15 +424,32 @@ def write_camera_chunk(file, camera):
   file.write(struct.pack("<H", (0 if camera.type == 'ORTHO' else 1)))
   file.write(struct.pack("<ff", camera.clip_start, camera.clip_end))
   
+  aspect_ratio = camera.sensor_width / camera.sensor_height
+  file.write(struct.pack("<f", aspect_ratio))
+  
+  file.write(struct.pack("<ff", camera.shift_x, camera.shift_y))
+  
+  file.write(struct.pack("<f", camera.sensor_width))
+  
+  # write DOF settings
+  dof_enabled = (camera.dof_distance > 0 or camera.dof_object is not None)
+  file.write(struct.pack("<H", (1 if dof_enabled else 0)))
+  
+  if dof_enabled:
+    if camera.dof_object is None:
+      file.write(struct.pack("<i", -1))
+    else:
+      file.write(struct.pack("<i", object_map[camera.dof_object.name]))
+      
+    file.write(struct.pack("<ff", camera.dof_distance, camera.gpu_dof.fstop))
+  
+  # write FOV / ortho size
   if camera.type == 'ORTHO':
     file.write(struct.pack("<f", camera.ortho_scale))
   else:
     real_fov = (camera.angle / 3.01675) * 172.847
     file.write(struct.pack("<f", real_fov))
     
-  aspect_ratio = camera.sensor_width / camera.sensor_height
-  file.write(struct.pack("<f", aspect_ratio))
-  
   close_chunk(file, ptr)
 
   
@@ -767,84 +788,84 @@ def write_rigidbody_chunk(file, rigidbody):
   
   close_chunk(file, ptr)
   
-def write_spline_chunk(file, curve):
+def write_spline_chunk(file, resolution, spline):
   # write chunk
   ptr = create_chunk(file, "SPLN", 1, get_uuid())
   
-  # write individual sub splines
-  file.write(struct.pack("<I", len(curve.splines)))
-  for sub_spline in curve.splines:
-    # get type
-    type = curve_type_dict.get(sub_spline.type, 0)
-      
-    # get tilt type
-    tilt_type = curve_tilt_dict.get(sub_spline.tilt_interpolation, 0)
-      
-    # write spline data (finally)
-    file.write(struct.pack("<HH", type, tilt_type))
+  #write spline point count
+  point_source = sub_spline.bezier_points if sub_spline.type == 'BEZIER' else sub_spline.points
+  file.write(struct.pack("<I", len(point_source)))
+  
+  # write segment count
+  file.write(struct.pack("<H", resolution))
+  
+  #write looped
+  file.write(struct.pack("<H", (1 if spline.use_cyclic_u else 0)))
+  
+  # get type and tilt type
+  type = curve_type_dict.get(spline.type, 0)
+  tilt_type = curve_tilt_dict.get(spline.tilt_interpolation, 0)
     
-    point_source = sub_spline.bezier_points if sub_spline.type == 'BEZIER' else sub_spline.points
-    file.write(struct.pack("<I", len(point_source)))
-    for point in point_source:
-      file.write(struct.pack("<fff", point.co[0], point.co[1], point.co[2]))
-      file.write(struct.pack("<fff", point.radius, point.tilt, (point.weight if sub_spline.type != 'BEZIER' else 0.0)))
-      if sub_spline.type == 'BEZIER':
-        file.write(struct.pack("<fff", point.handle_left[0], point.handle_left[1], point.handle_left[2]))
-        file.write(struct.pack("<fff", point.handle_right[0], point.handle_right[1], point.handle_right[2]))
-    
+  # write type and tilt type
+  file.write(struct.pack("<HH", type, tilt_type))
+  
+  for point in point_source:
+    file.write(struct.pack("<fff", point.co[0], point.co[1], point.co[2]))
+    file.write(struct.pack("<fff", point.radius, point.tilt, (point.weight if sub_spline.type != 'BEZIER' else 0.0)))
+    if sub_spline.type == 'BEZIER':
+      file.write(struct.pack("<fff", point.handle_left[0], point.handle_left[1], point.handle_left[2]))
+      file.write(struct.pack("<fff", point.handle_right[0], point.handle_right[1], point.handle_right[2]))
+  
   
   close_chunk(file, ptr)
 
   
-def write_vertex_group_chunk(file, object):
+def write_vertex_group_chunk(file, group, object):
     # write chunk
     ptr = create_chunk(file, "VTXG", 1, get_uuid())
     
     num_vertices = len(object.data.vertices)
-    num_groups = len(object.vertex_groups)
-    file.write(struct.pack("<I", num_groups))
     
-    for group in object.vertex_groups:
-      # write name
-      write_string(file, group.name)
-      active = (group.name == object.vertex_groups.active.name)
-      
-      # calculate sub pairs for efficient storage
-      sub_pairs = []
-      
-      pair_start = 0
-      pair_end = 0
-      in_void = False
-      
-      # look through verts + 1 to cause an exeption on the last vert
-      # kinda hacky :D
-      for vert_index in range(num_vertices + 1):
-        try:
-          # hack since we have no exception for out of bounds :|
-          if vert_index == num_vertices:
-            raise Exception("Shieeet")
-            
-          group.weight(vert_index)
+    # write name
+    write_string(file, group.name)
+    active = (group.name == object.vertex_groups.active.name)
+    
+    # calculate sub pairs for efficient storage
+    sub_pairs = []
+    
+    pair_start = 0
+    pair_end = 0
+    in_void = False
+    
+    # look through verts + 1 to cause an exeption on the last vert
+    # kinda hacky :D
+    for vert_index in range(num_vertices + 1):
+      try:
+        # hack since we have no exception for out of bounds :|
+        if vert_index == num_vertices:
+          raise Exception("Shieeet")
           
-          # start a new pair if the last thing we did was get an exception
-          if in_void:
-            in_void = False
-            pair_start = vert_index
-            
-          pair_end = vert_index
-        except Exception:
-          if not in_void and pair_end != pair_start:
-            sub_pairs.append([pair_start, pair_end])
-            
-          in_void = True
-      
-      # write the rest of the VertexGroup, then write the sub pairs
-      file.write(struct.pack("<HH", (1 if active else 0), len(sub_pairs)))
-      
-      for pair in sub_pairs:
-        file.write(struct.pack("<II", *pair))
-        for vert_index in range(pair[0], pair[1] + 1):
-          file.write(struct.pack("<f", group.weight(vert_index)))
+        group.weight(vert_index)
+        
+        # start a new pair if the last thing we did was get an exception
+        if in_void:
+          in_void = False
+          pair_start = vert_index
+          
+        pair_end = vert_index
+      except Exception:
+        if not in_void and pair_end != pair_start:
+          sub_pairs.append([pair_start, pair_end])
+          
+        in_void = True
+    
+    # write the rest of the VertexGroup, then write the sub pairs
+    file.write(struct.pack("<HH", (1 if active else 0), len(sub_pairs)))
+    
+    for pair in sub_pairs:
+      file.write(struct.pack("<II", *pair))
+      for vert_index in range(pair[0], pair[1] + 1):
+        file.write(struct.pack("<f", group.weight(vert_index)))
       
       
     
@@ -1289,8 +1310,11 @@ def export_scene(file):
     curve_map = {}
     
     for curve in bpy.data.curves:
-      write_spline_chunk(file, curve)
-      curve_map[curve.name] = current_id
+      curve_splines = curve.splines
+      spline_count = len(curve_splines)
+      for cspline in range(spline_count):
+        write_spline_chunk(file, curve.resolution_u, curve_splines[cspline])
+        curve_map[curve.name + "_SCN_EXPORT_ID_" + str(cspline)] = current_id
     
     # write meshes
     global mesh_map
@@ -1387,8 +1411,9 @@ def export_scene(file):
         
         # write the vertex group chunk for me!! :)
         if len(ob.vertex_groups) > 0:
-          write_vertex_group_chunk(file, ob)
-          vertex_group_map[ob.name] = current_id
+          for group in ob.vertex_groups:
+            write_vertex_group_chunk(file, group, ob)
+            vertex_group_map[group.name] = current_id
           
         # write modifier chunks
         if export_options["MODIFIER_MODE"] == 'preserve':
